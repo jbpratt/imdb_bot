@@ -1,0 +1,16 @@
+[package]
+name = "boot"
+version = "0.1.0"
+authors = ["jbpratt78 <jbpratt78@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+env_logger = "0.5.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dependencies.ws]
+version = "*"
+features = ["ssl"]
