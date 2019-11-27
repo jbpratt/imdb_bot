@@ -2,13 +2,13 @@
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::result;
 
 use failure::bail;
 use flate2::read::GzDecoder;
 use reqwest;
 
-use crate::Result;
-
+type Result<T> = result::Result<T, failure::Error>;
 /// The base URL to the IMDb data set.
 ///
 /// It's not clear if this URL will remain free and open forever, although it
