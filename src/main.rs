@@ -9,7 +9,7 @@ use imdb_index::{IndexBuilder, Index, MediaEntity, Query, SearchResults, Searche
 use serde::Deserialize;
 use std::path::Path;
 use failure;
-use std::result;
+use std::{result, fs};
 use ws::{connect, Message};
 
 mod download;
@@ -41,7 +41,10 @@ fn main() {
         download::download_all(&data_dir).unwrap();
     }
     
-    create_index(data_dir, index_dir).unwrap();
+    if !path_exists("./index") {
+        println!("Building indices... This will take a while.");
+        create_index(data_dir, index_dir).unwrap();
+    }
     if let Err(error) = connect("wss://chat2.strims.gg/ws", |_out| {
         move |msg| {
             handle_rec(msg);
@@ -50,6 +53,10 @@ fn main() {
     }) {
         println!("Failed to create WebSocket due to: {:?}", error);
     }
+}
+
+fn path_exists(path: &str) -> bool {
+    fs::metadata(path).is_ok()
 }
 
 fn handle_rec(msg: Message) -> () {
@@ -90,7 +97,6 @@ fn parse(in_msg: Vec<&str>) -> Result<Msg> {
 fn search_imdb(query: &str) -> SearchResults<MediaEntity> {
     // this should be in a setup bc it is expensive
     println!("starting search with {:}", query);
-    println!("created index");
     let z: Query = Query::new().name(query);
 
     let data_dir: &Path = Path::new("./data/");
