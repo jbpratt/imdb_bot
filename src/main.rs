@@ -1,11 +1,20 @@
 extern crate env_logger;
+extern crate imdb_index;
 extern crate serde_json;
 extern crate ws;
+extern crate argparse;
 
+use argparse::{ArgumentParser, StoreTrue};
+use imdb_index::{IndexBuilder, Index, MediaEntity, Query, SearchResults, Searcher};
 use serde::Deserialize;
-use serde_json::Result;
-
+use std::path::Path;
+use failure;
+use std::result;
 use ws::{connect, Message};
+
+mod download;
+
+type Result<T> = result::Result<T, failure::Error>;
 
 #[derive(Debug, Deserialize, PartialEq)]
 struct Msg {
@@ -15,7 +24,25 @@ struct Msg {
 
 fn main() {
     env_logger::init();
-    if let Err(error) = connect("wss://chat.strims.gg/ws", |_out| {
+
+    let data_dir: &Path = Path::new("./data/");
+    let index_dir: &Path = Path::new("./index/");
+    let mut download = false;
+    {  // this block limits scope of borrows by ap.refer() method
+        let mut ap = ArgumentParser::new();
+        ap.set_description("Greet somebody.");
+        ap.refer(&mut download)
+            .add_option(&["--download"], StoreTrue,
+            "download imdb index files");
+        ap.parse_args_or_exit();
+    }
+
+    if download {
+        download::download_all(&data_dir).unwrap();
+    }
+    
+    create_index(data_dir, index_dir).unwrap();
+    if let Err(error) = connect("wss://chat2.strims.gg/ws", |_out| {
         move |msg| {
             handle_rec(msg);
             Ok(())
@@ -32,7 +59,14 @@ fn handle_rec(msg: Message) -> () {
             match x[0] {
                 "MSG" => {
                     let _v = match parse(x) {
-                        Ok(v) => println!("{:?}", v),
+                        Ok(v) => {
+                            println!("{:?}", v);
+                            if v.data.starts_with("!imdb") {
+                                let x = v.data.trim_start_matches("!imdb");
+                                let y = search_imdb(x);
+                                println!("{:?}", y);
+                            }
+                        }
                         Err(e) => panic!(e),
                     };
                 }
@@ -51,6 +85,23 @@ fn split_once(in_string: &str) -> Vec<&str> {
 fn parse(in_msg: Vec<&str>) -> Result<Msg> {
     let m: Msg = serde_json::from_str(in_msg[1])?;
     Ok(m)
+}
+
+fn search_imdb(query: &str) -> SearchResults<MediaEntity> {
+    // this should be in a setup bc it is expensive
+    println!("starting search with {:}", query);
+    println!("created index");
+    let z: Query = Query::new().name(query);
+
+    let data_dir: &Path = Path::new("./data/");
+    let index_dir: &Path = Path::new("./index/");
+    let opened_index = Index::open(data_dir, index_dir).unwrap();
+    let mut searcher = Searcher::new(opened_index);
+    searcher.search(&z).unwrap()
+}
+
+fn create_index(data_dir: &Path, index_dir: &Path) -> Result<Index> {
+    Ok(IndexBuilder::new().create(data_dir, index_dir)?)
 }
 
 #[cfg(test)]
