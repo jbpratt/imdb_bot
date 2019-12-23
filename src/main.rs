@@ -1,17 +1,23 @@
 extern crate argparse;
 extern crate env_logger;
 extern crate imdb_index;
+extern crate rusoto_core;
+extern crate rusoto_s3;
 extern crate serde_json;
 extern crate ws;
+
+use std::env;
+use std::path::Path;
+use std::{fs, result};
 
 use argparse::{ArgumentParser, StoreTrue};
 use failure;
 use imdb_index::{Index, IndexBuilder, MediaEntity, Query, SearchResults, Searcher};
+use rusoto_core::Region;
+use rusoto_s3::S3Client;
 use serde::Deserialize;
-use std::path::Path;
-use std::{fs, result};
 use url;
-use ws::{connect, Message, Handler, Sender, Result, Request, Response};
+use ws::{connect, Handler, Handshake, Message, Request, Result, Sender};
 
 mod download;
 
@@ -24,27 +30,36 @@ struct Msg {
 }
 
 struct Client {
-    out: Sender
+    ws: Sender,
+    s3_client: S3Client,
 }
 
 impl Handler for Client {
     fn build_request(&mut self, url: &url::Url) -> Result<Request> {
-        let req = Request::from_url(url).unwrap();
-        //let mut headers = req.headers_mut();
-        //headers.push();
+        let mut req = Request::from_url(url).unwrap();
+        let key = "STRIMS_TOKEN";
+        let val = env::var(key).unwrap();
+        let cookie = format!("jwt={}", val);
+        req.headers_mut().push(("Cookie".into(), cookie.into()));
         Ok(req)
     }
 
+    fn on_open(&mut self, _: Handshake) -> Result<()> {
+        // Now we don't need to call unwrap since `on_open` returns a `Result<()>`.
+        // If this call fails, it will only result in this connection disconnecting.
+        self.ws.send("Hello WebSocket")
+    }
+
     fn on_message(&mut self, msg: Message) -> Result<()> {
-            handle_rec(msg);
-            Ok(())
+        handle_rec(msg);
+        Ok(())
     }
 }
 
 const IMDB_URL: &str = "https://www.imdb.com/title/";
 
 fn main() {
-    env_logger::init();
+    let _ = env_logger::try_init();
 
     let data_dir: &Path = Path::new("./data/");
     let index_dir: &Path = Path::new("./index/");
@@ -52,7 +67,7 @@ fn main() {
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
-        ap.set_description("Greet somebody.");
+        ap.set_description("Strims IMDB Bot");
         ap.refer(&mut download)
             .add_option(&["--download"], StoreTrue, "download imdb index files");
         ap.parse_args_or_exit();
@@ -65,8 +80,9 @@ fn main() {
         println!("Building indices... This will take a while.");
         create_index(data_dir, index_dir).unwrap();
     }
-    if let Err(error) = connect("wss://chat2.strims.gg/ws", |out| {
-        Client { out }
+    if let Err(error) = connect("wss://chat.strims.gg/ws", |ws| Client {
+        ws,
+        s3_client: S3Client::new(Region::UsWest1),
     }) {
         println!("Failed to create WebSocket due to: {:?}", error);
     }
