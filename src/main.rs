@@ -64,6 +64,7 @@ fn main() {
     let data_dir: &Path = Path::new("./data/");
     let index_dir: &Path = Path::new("./index/");
     let mut download = false;
+
     {
         // this block limits scope of borrows by ap.refer() method
         let mut ap = ArgumentParser::new();
@@ -76,10 +77,12 @@ fn main() {
     if download {
         download::download_all(&data_dir).unwrap();
     }
+
     if !path_exists("./index") {
         println!("Building indices... This will take a while.");
         create_index(data_dir, index_dir).unwrap();
     }
+
     if let Err(error) = connect("wss://chat.strims.gg/ws", |ws| Client {
         ws,
         s3_client: S3Client::new(Region::UsWest1),
