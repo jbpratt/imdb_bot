@@ -1,4 +1,3 @@
-extern crate argparse;
 extern crate env_logger;
 extern crate imdb_index;
 extern crate serde_json;
@@ -8,7 +7,6 @@ use std::env;
 use std::path::Path;
 use std::{fs, result};
 
-use argparse::{ArgumentParser, StoreTrue};
 use failure;
 use imdb_index::{Index, IndexBuilder, MediaEntity, Query, SearchResults, Searcher};
 use serde::Deserialize;
@@ -61,10 +59,16 @@ impl Handler for Client {
                                     let res = results.first().unwrap().clone();
                                     let (rating, result) = res.into_pair();
                                     let title = result.title();
+
+                                    let mut imdb_rating: f32 = 0.0;
+                                    match result.rating() {
+                                        Some(v) => imdb_rating = v.rating,
+                                        None => (),
+                                    }
                                     // attempt to send msg
                                     match self.ws.send(format!(
-                                        "{} https://www.imdb.com/title/{}/",
-                                        title.title, title.id
+                                        "MSG {{\"data\": \"{} ({}) https://www.imdb.com/title/{}/\"}}",
+                                        title.title, imdb_rating, title.id
                                     )) {
                                         Ok(_) => println!("Sent"),
                                         Err(error) => panic!("Failed to send msg: {}", error),
@@ -77,11 +81,10 @@ impl Handler for Client {
                             Err(e) => panic!(e),
                         };
                     }
-                    "JOIN" | "QUIT" => println!("join or quit: {}", x[1]),
-                    _ => println!("memes: {:?}", x),
+                    _ => (),
                 }
             }
-            Message::Binary(_) => println!("weow binary msg received"),
+            Message::Binary(_) => (),
         };
         Ok(())
     }
@@ -94,13 +97,11 @@ fn main() {
     let index_dir: &Path = Path::new("./index/");
     let mut download = false;
 
-    {
-        // this block limits scope of borrows by ap.refer() method
-        let mut ap = ArgumentParser::new();
-        ap.set_description("Strims IMDB Bot");
-        ap.refer(&mut download)
-            .add_option(&["--download"], StoreTrue, "download imdb index files");
-        ap.parse_args_or_exit();
+    let args: Vec<String> = env::args().collect();
+    match args.len() {
+        1 => (),
+        2 => download = true,
+        _ => (),
     }
 
     if download {
