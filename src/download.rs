@@ -43,7 +43,7 @@ pub fn download_all<P: AsRef<Path>>(dir: P) -> Result<bool> {
 
 /// Update will update all data set files, regardless of whether they already
 /// exist or not.
-pub fn update_all<P: AsRef<Path>>(dir: P) -> Result<()> {
+pub fn _update_all<P: AsRef<Path>>(dir: P) -> Result<()> {
     let dir = dir.as_ref();
     fs::create_dir_all(dir)?;
 
@@ -60,9 +60,9 @@ fn download_one(outdir: &Path, dataset: &'static str) -> Result<()> {
     let mut outfile = File::create(&outpath)?;
 
     let url = format!("{}/{}", IMDB_BASE_URL, dataset);
-    log::info!("downloading {} to {}", url, outpath.display());
+    println!("downloading {} to {}", url, outpath.display());
     let mut resp = GzDecoder::new(reqwest::get(&url)?.error_for_status()?);
-    log::info!("sorting CSV records");
+    println!("sorting CSV records");
     write_sorted_csv_records(&mut resp, &mut outfile)?;
     Ok(())
 }
@@ -95,12 +95,9 @@ fn dataset_path(dir: &Path, name: &'static str) -> PathBuf {
 /// in lexicographic order with respect to the `tt` identifiers. This appears
 /// to be fallout as a result of adding 10 character identifiers (previously,
 /// only 9 character identifiers were used).
-fn write_sorted_csv_records<R: io::Read, W: io::Write>(
-    rdr: R,
-    wtr: W,
-) -> Result<()> {
-    use std::io::Write;
+fn write_sorted_csv_records<R: io::Read, W: io::Write>(rdr: R, wtr: W) -> Result<()> {
     use bstr::{io::BufReadExt, ByteSlice};
+    use std::io::Write;
 
     // We actually only sort the raw lines here instead of parsing CSV records,
     // since parsing into CSV records has fairly substantial memory overhead.
@@ -121,12 +118,10 @@ fn write_sorted_csv_records<R: io::Read, W: io::Write>(
         // where there are duplicate rows.
         let first = match line.split_str("\t").next() {
             Some(first) => first,
-            None => {
-                bail!(
-                    "expected to find one tab-delimited field in '{:?}'",
-                    line.as_bstr(),
-                )
-            }
+            None => bail!(
+                "expected to find one tab-delimited field in '{:?}'",
+                line.as_bstr(),
+            ),
         };
         if i > 0 && prev == Some(first) {
             continue;

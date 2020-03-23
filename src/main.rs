@@ -1,8 +1,6 @@
 extern crate argparse;
 extern crate env_logger;
 extern crate imdb_index;
-extern crate rusoto_core;
-extern crate rusoto_s3;
 extern crate serde_json;
 extern crate ws;
 
@@ -13,8 +11,6 @@ use std::{fs, result};
 use argparse::{ArgumentParser, StoreTrue};
 use failure;
 use imdb_index::{Index, IndexBuilder, MediaEntity, Query, SearchResults, Searcher};
-use rusoto_core::Region;
-use rusoto_s3::S3Client;
 use serde::Deserialize;
 use url;
 use ws::{connect, Handler, Handshake, Message, Request, Result, Sender};
@@ -31,7 +27,6 @@ struct Msg {
 
 struct Client {
     ws: Sender,
-    s3_client: S3Client,
 }
 
 impl Handler for Client {
@@ -51,12 +46,46 @@ impl Handler for Client {
     }
 
     fn on_message(&mut self, msg: Message) -> Result<()> {
-        handle_rec(msg);
+        match msg {
+            Message::Text(text) => {
+                let x = split_once(&text);
+                match x[0] {
+                    "MSG" => {
+                        let _ = match parse(x) {
+                            Ok(v) => {
+                                if v.data.starts_with("!imdb") {
+                                    let x = v.data.trim_start_matches("!imdb");
+                                    // Search imdb index
+                                    let mut results = search_imdb(&x).into_vec();
+                                    results.dedup();
+                                    let res = results.first().unwrap().clone();
+                                    let (rating, result) = res.into_pair();
+                                    let title = result.title();
+                                    // attempt to send msg
+                                    match self.ws.send(format!(
+                                        "{} https://www.imdb.com/title/{}/",
+                                        title.title, title.id
+                                    )) {
+                                        Ok(_) => println!("Sent"),
+                                        Err(error) => panic!("Failed to send msg: {}", error),
+                                    }
+                                    println!(
+                                "Highest ranking result:\n{} {} {} https://www.imdb.com/title/{}/\n",
+                                rating, title.title, title.genres, title.id);
+                                }
+                            }
+                            Err(e) => panic!(e),
+                        };
+                    }
+                    "JOIN" | "QUIT" => println!("join or quit: {}", x[1]),
+                    _ => println!("memes: {:?}", x),
+                }
+            }
+            Message::Binary(_) => println!("weow binary msg received"),
+        };
         Ok(())
     }
 }
-
-const IMDB_URL: &str = "https://www.imdb.com/title/";
 
 fn main() {
     let _ = env_logger::try_init();
@@ -83,50 +112,13 @@ fn main() {
         create_index(data_dir, index_dir).unwrap();
     }
 
-    if let Err(error) = connect("wss://chat.strims.gg/ws", |ws| Client {
-        ws,
-        s3_client: S3Client::new(Region::UsWest1),
-    }) {
+    if let Err(error) = connect("wss://chat.strims.gg/ws", |ws| Client { ws }) {
         println!("Failed to create WebSocket due to: {:?}", error);
     }
 }
 
 fn path_exists(path: &str) -> bool {
     fs::metadata(path).is_ok()
-}
-
-// return string result if found then send from handler
-fn handle_rec(msg: Message) -> () {
-    match msg {
-        Message::Text(text) => {
-            let x = split_once(&text);
-            match x[0] {
-                "MSG" => {
-                    let _v = match parse(x) {
-                        Ok(v) => {
-                            println!("{:?}", v);
-                            if v.data.starts_with("!imdb") {
-                                let x = v.data.trim_start_matches("!imdb");
-                                let y = search_imdb(x);
-                                let first_result = y.as_slice().first().unwrap().value();
-                                //let first_result_rating = first_result.rating().unwrap();
-                                println!(
-                                    "Found: {} {}",
-                                    first_result.title().title,
-                                    //first_result_rating.rating,
-                                    format!("{}{}", IMDB_URL, first_result.title().id)
-                                );
-                            }
-                        }
-                        Err(e) => panic!(e),
-                    };
-                }
-                "JOIN" | "QUIT" => println!("join or quit: {}", x[1]),
-                _ => println!("memes: {:?}", x),
-            }
-        }
-        Message::Binary(_) => println!("weow binary msg received"),
-    }
 }
 
 fn split_once(in_string: &str) -> Vec<&str> {
