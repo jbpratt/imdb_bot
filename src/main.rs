@@ -11,7 +11,7 @@ use failure;
 use imdb_index::{Index, IndexBuilder, MediaEntity, Query, Rating, SearchResults, Searcher};
 use serde::Deserialize;
 use url;
-use ws::{connect, Handler, Handshake, Message, Request, Result, Sender};
+use ws::{connect, Handler, Message, Request, Result, Sender};
 
 mod download;
 
@@ -37,12 +37,6 @@ impl Handler for Client {
         Ok(req)
     }
 
-    fn on_open(&mut self, _: Handshake) -> Result<()> {
-        // Now we don't need to call unwrap since `on_open` returns a `Result<()>`.
-        // If this call fails, it will only result in this connection disconnecting.
-        self.ws.send("Hello WebSocket")
-    }
-
     fn on_message(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Text(text) => {
@@ -53,13 +47,13 @@ impl Handler for Client {
                             Ok(v) => {
                                 if v.data.starts_with("!imdb") {
                                     let query = v.data.trim_start_matches("!imdb");
-                                    // Search imdb index
-                                    let mut results = search_imdb(&query).into_vec();
                                     let temp = Rating {
                                         id: String::from("X"),
                                         rating: 0.0,
                                         votes: 0,
                                     };
+                                    // Search imdb index
+                                    let mut results = search_imdb(&query).into_vec();
                                     // Sort by rating votes
                                     results.sort_by(|a, b| {
                                         a.value()
@@ -68,8 +62,8 @@ impl Handler for Client {
                                             .votes
                                             .cmp(&b.value().rating().unwrap_or(&temp).votes)
                                     });
-                                    let last = results.last().unwrap().clone();
-                                    let (rating, result) = last.into_pair();
+                                    let (rating, result) =
+                                        results.last().unwrap().clone().into_pair();
                                     let title = result.title();
                                     let imdb_rating: f32 = match result.rating() {
                                         Some(v) => v.rating,
@@ -105,35 +99,19 @@ impl Handler for Client {
 fn main() {
     let _ = env_logger::try_init();
 
-    let data_dir: &Path = Path::new("./data/");
-    let index_dir: &Path = Path::new("./index/");
-    let mut download = false;
-
-    let args: Vec<String> = env::args().collect();
-    match args.len() {
-        1 => (),
-        2 => download = true,
-        _ => (),
-    }
-
-    if download {
-        download::download_all(&data_dir).unwrap();
-    }
-
-    if !path_exists("./index") {
+    if !fs::metadata("data").is_ok() {
+        println!("Downloading imdb data...");
+        download::download_all("data").unwrap();
         println!("Building indices... This will take a while.");
-        create_index(data_dir, index_dir).unwrap();
+        IndexBuilder::new().create("data", "index").unwrap();
+        println!("Done building, ready to search");
     }
 
     println!("Connecting to chat...");
-
     if let Err(error) = connect("wss://chat.strims.gg/ws", |ws| Client { ws }) {
         println!("Failed to create WebSocket due to: {:?}", error);
     }
-}
-
-fn path_exists(path: &str) -> bool {
-    fs::metadata(path).is_ok()
+    println!("Connected..");
 }
 
 fn split_once(in_string: &str) -> Vec<&str> {
@@ -153,10 +131,6 @@ fn search_imdb(query: &str) -> SearchResults<MediaEntity> {
     let opened_index = Index::open(data_dir, index_dir).unwrap();
     let mut searcher = Searcher::new(opened_index);
     searcher.search(&z).unwrap()
-}
-
-fn create_index(data_dir: &Path, index_dir: &Path) -> ImdbResult<Index> {
-    Ok(IndexBuilder::new().create(data_dir, index_dir)?)
 }
 
 #[cfg(test)]
