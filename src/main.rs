@@ -8,7 +8,7 @@ use std::path::Path;
 use std::{fs, result};
 
 use failure;
-use imdb_index::{Index, IndexBuilder, MediaEntity, Query, SearchResults, Searcher};
+use imdb_index::{Index, IndexBuilder, MediaEntity, Query, Rating, SearchResults, Searcher};
 use serde::Deserialize;
 use url;
 use ws::{connect, Handler, Handshake, Message, Request, Result, Sender};
@@ -52,30 +52,42 @@ impl Handler for Client {
                         let _ = match parse(x) {
                             Ok(v) => {
                                 if v.data.starts_with("!imdb") {
-                                    let x = v.data.trim_start_matches("!imdb");
+                                    let query = v.data.trim_start_matches("!imdb");
                                     // Search imdb index
-                                    let mut results = search_imdb(&x).into_vec();
-                                    results.dedup();
-                                    let res = results.first().unwrap().clone();
-                                    let (rating, result) = res.into_pair();
+                                    let mut results = search_imdb(&query).into_vec();
+                                    let temp = Rating {
+                                        id: String::from("X"),
+                                        rating: 0.0,
+                                        votes: 0,
+                                    };
+                                    // Sort by rating votes
+                                    results.sort_by(|a, b| {
+                                        a.value()
+                                            .rating()
+                                            .unwrap_or(&temp)
+                                            .votes
+                                            .cmp(&b.value().rating().unwrap_or(&temp).votes)
+                                    });
+                                    let last = results.last().unwrap().clone();
+                                    let (rating, result) = last.into_pair();
                                     let title = result.title();
-
-                                    let mut imdb_rating: f32 = 0.0;
-                                    match result.rating() {
-                                        Some(v) => imdb_rating = v.rating,
-                                        None => (),
-                                    }
+                                    let imdb_rating: f32 = match result.rating() {
+                                        Some(v) => v.rating,
+                                        None => 0.,
+                                    };
+                                    let start_year = title.start_year.unwrap_or(0);
                                     // attempt to send msg
                                     match self.ws.send(format!(
-                                        "MSG {{\"data\": \"{} ({}) https://www.imdb.com/title/{}/\"}}",
-                                        title.title, imdb_rating, title.id
+                                        "MSG {{\"data\": \"{} ({} - {}) https://www.imdb.com/title/{}/\"}}",
+                                        title.title, start_year, imdb_rating, title.id
                                     )) {
                                         Ok(_) => println!("Sent"),
                                         Err(error) => panic!("Failed to send msg: {}", error),
                                     }
                                     println!(
-                                "Highest ranking result:\n{} {} {} https://www.imdb.com/title/{}/\n",
-                                rating, title.title, title.genres, title.id);
+                                        "{} {} {} https://www.imdb.com/title/{}/\n",
+                                        rating, title.title, title.genres, title.id
+                                    );
                                 }
                             }
                             Err(e) => panic!(e),
@@ -112,6 +124,8 @@ fn main() {
         println!("Building indices... This will take a while.");
         create_index(data_dir, index_dir).unwrap();
     }
+
+    println!("Connecting to chat...");
 
     if let Err(error) = connect("wss://chat.strims.gg/ws", |ws| Client { ws }) {
         println!("Failed to create WebSocket due to: {:?}", error);
